@@ -1446,7 +1446,7 @@ void I_StartFrame(void) {}
 void I_EnableLoadingDisk(void) {}
 void I_BindVideoVariables(void) {}
 void I_GraphicsCheckCommandLine(void) {}
-
+void I_SetWindowTitle(const char *t) { (void)t; }
 void I_SetGrabMouseCallback(void *cb) { (void)cb; }
 void I_InitGraphics(void) {} /* PSP init done in DG_Init */
 
