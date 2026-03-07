@@ -43,9 +43,9 @@ extern int usergame;
 
 /* PSP module info - required for homebrew */
 PSP_MODULE_INFO("BatmanDoom", 0, 1, 0);
-PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER);
-PSP_MAIN_THREAD_STACK_SIZE_KB(256); /* 256KB stack for main thread */
-PSP_HEAP_SIZE_KB(20 * 1024);        /* 20MB heap — leaves room for stack+OS */
+PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
+PSP_MAIN_THREAD_STACK_SIZE_KB(64); /* 64KB stack for main thread */
+PSP_HEAP_SIZE_KB(-1);              /* auto: use all available RAM */
 
 #define DATA_PATH "ms0:/PSP/GAME/BATDOOM/"
 
@@ -140,7 +140,15 @@ void DG_Init(void) {
     debug_log("FATAL: VideoBuffer alloc failed");
     sceKernelExitGame();
   }
-  memset(tex_buf, 0, sizeof(tex_buf));
+  /* Allocate texture buffer dynamically (512*256*4 = 512KB) */
+  if (!tex_buf) {
+    tex_buf = (uint32_t *)memalign(16, TEX_W * TEX_H * sizeof(uint32_t));
+    if (!tex_buf) {
+      debug_log("FATAL: tex_buf alloc failed");
+      sceKernelExitGame();
+    }
+  }
+  memset(tex_buf, 0, TEX_W * TEX_H * sizeof(uint32_t));
   debug_log("DG_Init OK");
 }
 
@@ -1397,25 +1405,30 @@ void I_EndRead(void) {}
 
 /* Memory zone base — use malloc from PSP heap (set by PSP_HEAP_SIZE_KB).
  * sceKernelAllocPartitionMemory requires kernel mode — use malloc instead. */
-#define ZONE_SIZE_MAIN (12 * 1024 * 1024) /* 12 MB zone */
-#define ZONE_SIZE_FALL (8 * 1024 * 1024)  /*  8 MB fallback */
+#define ZONE_SIZE_10M (10 * 1024 * 1024)
+#define ZONE_SIZE_8M (8 * 1024 * 1024)
+#define ZONE_SIZE_6M (6 * 1024 * 1024)
+#define ZONE_SIZE_4M (4 * 1024 * 1024)
 
 static void *zone_ptr = NULL;
 static int zone_actual_size = 0;
 
 void *I_ZoneBase(int *size) {
   if (!zone_ptr) {
-    zone_ptr = malloc(ZONE_SIZE_MAIN);
-    if (zone_ptr) {
-      zone_actual_size = ZONE_SIZE_MAIN;
-    } else {
-      zone_ptr = malloc(ZONE_SIZE_FALL);
+    /* Try progressively smaller sizes */
+    static const int try_sizes[] = {ZONE_SIZE_10M, ZONE_SIZE_8M, ZONE_SIZE_6M,
+                                    ZONE_SIZE_4M, 0};
+    int i;
+    for (i = 0; try_sizes[i] > 0; i++) {
+      zone_ptr = malloc(try_sizes[i]);
       if (zone_ptr) {
-        zone_actual_size = ZONE_SIZE_FALL;
-      } else {
-        debug_log("FATAL: cannot allocate zone memory");
-        sceKernelExitGame();
+        zone_actual_size = try_sizes[i];
+        break;
       }
+    }
+    if (!zone_ptr) {
+      debug_log("FATAL: cannot allocate zone memory");
+      sceKernelExitGame();
     }
     debug_logf("I_ZoneBase: allocated %d bytes", zone_actual_size);
   }
